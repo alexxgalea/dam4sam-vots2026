@@ -1,0 +1,58 @@
+# ── Virtual environments ──
+.venv/
+**/.venv/
+sam3_venv/
+
+# ── Model weights (download separately, see README) ──
+*.pt
+*.pth
+**/checkpoints/
+
+# ── Datasets (download via vot toolkit / LaSOT) ──
+workspace2026/sequences/
+workspace*/sequences/
+lasot/
+lasot_drift_out/
+
+# ── Results, submission archives, raw outputs ──
+**/results/
+*.zip
+*.bin
+
+# ── Large vendored upstream (SAM3 experiment; weights gated, not part of submissions) ──
+sam3_upstream/
+
+# ── Other VOT workspaces (datasets / cache / analysis results) ──
+workspace_vost_val/
+workspace_hard/
+workspace/
+workspace2026/analysis/
+workspace2026/cache/
+
+# ── Probe / analysis raw outputs ──
+v7_probe_out/
+
+# ── Local flags / editor / Claude config ──
+*.flag
+calib_result.txt
+.claude/
+
+# ── Internal planning / personal notes (NOT for a public repo) ──
+PLAN_WIN_VOTS2026.md
+PLAN_TONIGHT_OPUS.md
+PLAN_2GPU_RUN.md
+BRIEFING_FABLE.md
+BRIEFING_FABLE_R2.md
+RAPORT_INDRUMATOARE.md
+MIGRATION_PLAN.md
+
+# ── Python / OS cruft ──
+__pycache__/
+*.pyc
+*.egg-info/
+.ipynb_checkpoints/
+*.log
+.DS_Store
+
+# upstream example images (not needed)
+dam4sam/imgs/
