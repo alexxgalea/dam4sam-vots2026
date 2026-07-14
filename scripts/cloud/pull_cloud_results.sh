@@ -7,18 +7,18 @@
 # This is the safety net that was MISSING on 2026-06-12, when a GPU Xid fault
 # stranded 20 sequences on a box whose disk was still reachable (rescued by hand).
 #
-# Usage:   bash pull_cloud_results.sh <ssh_port> [host] [out_tracker] [interval_s]
-# Example: bash pull_cloud_results.sh 40913 38.117.87.43 dam4sam_l_cloud 180
+# Usage:   bash scripts/cloud/pull_cloud_results.sh <ssh_port> <host> [out_tracker] [interval_s]
+# Example: bash scripts/cloud/pull_cloud_results.sh 40913 203.0.113.7 dam4sam_l_cloud 180
 #
 # Launch it in the background right after `cloud_run_l.sh full` starts, e.g.:
-#   nohup bash pull_cloud_results.sh 40913 > pull_l_cloud.log 2>&1 &
+#   nohup bash scripts/cloud/pull_cloud_results.sh 40913 <host> > pull_l_cloud.log 2>&1 &
 set -uo pipefail
-PORT="${1:?usage: pull_cloud_results.sh <ssh_port> [host] [out_tracker] [interval_s]}"
-HOST="${2:-38.117.87.43}"
+PORT="${1:?usage: pull_cloud_results.sh <ssh_port> <host> [out_tracker] [interval_s]}"
+HOST="${2:?usage: pull_cloud_results.sh <ssh_port> <host> [out_tracker] [interval_s]}"
 OUT="${3:-dam4sam_l_cloud}"
 INT="${4:-180}"
-BASE=/home/alexx/Projects/VOTSTracker
-REMOTE="$BASE/workspace2026/results/$OUT/baseline/"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+REMOTE="$BASE/workspace2026/results/$OUT/baseline/"   # remote clone must live at the same path
 LOCAL="$BASE/workspace2026/results/$OUT/baseline/"
 mkdir -p "$LOCAL"
 SSH="ssh -p $PORT -o ConnectTimeout=15 -o BatchMode=yes -o ServerAliveInterval=10"

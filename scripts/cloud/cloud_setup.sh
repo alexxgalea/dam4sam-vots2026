@@ -1,10 +1,10 @@
 #!/bin/bash
-# Cloud GPU setup for the Hiera-L 170-run (PLAN_WIN_VOTS2026 §2, submission S2).
+# Cloud GPU environment setup for the full-dataset SAM2.1-Large runs.
 # Run ON the rented instance (Ubuntu 22.04 + CUDA 12.x image, e.g. RTX 4090 24GB),
-# AFTER uploading the code (see CLOUD_GPU_INSTRUCTIONS.md step 2).
+# AFTER uploading the code (see docs/CLOUD_SETUP.md).
 set -euo pipefail
 
-BASE=/home/alexx/Projects/VOTSTracker   # keep IDENTICAL path — scripts hardcode it
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$BASE"
 
 echo "== [1/5] uv + Python 3.10 venv (matches local) =="
@@ -44,7 +44,7 @@ EOF
 
 cat <<'EOF'
 
-SETUP DONE. Next (see CLOUD_GPU_INSTRUCTIONS.md):
-  1. SMOKE TEST (mandatory, §6.1):  bash cloud_run_l.sh smoke
-  2. FULL RUN:                      bash cloud_run_l.sh full
+SETUP DONE. Next (see docs/CLOUD_SETUP.md):
+  1. SMOKE TEST (mandatory):  bash scripts/cloud/cloud_run_l.sh smoke
+  2. FULL RUN:                bash scripts/cloud/cloud_run_l.sh full
 EOF

@@ -1,9 +1,11 @@
 """
-Runner pentru toate 170 de secvente VOTS2026. Identic cu run_eval.py dar:
-  - SEQUENCES_DIR si RESULTS_ROOT pointeaza la workspace2026
-  - Lista de secvente = tot ce exista in workspace2026/sequences/
-  - Sare automat peste secventele deja calculate (resumabil)
-  - Suporta --max-regression pentru early-stop greedy
+Sequence runner for the VOTS2026 evaluation workspace.
+
+  - Runs a selected tracker variant over every sequence in workspace2026/sequences/
+    (or an explicit subset via --seqs) and writes VOT-format .bin mask trajectories.
+  - Skips sequences that already have complete results, so long runs are resumable
+    after crashes or cloud preemptions.
+  - Supports --max-regression for greedy early-stopping against a baseline run.
 """
 import sys, os, re, random
 import numpy as np
@@ -12,8 +14,9 @@ from pathlib import Path
 from PIL import Image
 import argparse
 
-sys.path.insert(0, "/home/alexx/Projects/VOTSTracker")
-sys.path.insert(0, "/home/alexx/Projects/VOTSTracker/dam4sam")
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "dam4sam"))
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 from vot.region.io import read_trajectory, write_trajectory
@@ -21,9 +24,9 @@ from vot.region.shapes import Mask
 from utils.utils import determine_tracker
 from sam2.build_sam import build_sam2_video_predictor
 
-SEQUENCES_DIR = Path("/home/alexx/Projects/VOTSTracker/workspace2026/sequences")
-RESULTS_ROOT  = Path("/home/alexx/Projects/VOTSTracker/workspace2026/results")
-BASELINE_DIR  = Path("/home/alexx/Projects/VOTSTracker/workspace2026/results/dam4sam_b/baseline")
+SEQUENCES_DIR = REPO_ROOT / "workspace2026/sequences"
+RESULTS_ROOT  = REPO_ROOT / "workspace2026/results"
+BASELINE_DIR  = REPO_ROOT / "workspace2026/results/dam4sam_b/baseline"
 TRACKER_NAME  = "sam21pp-B"
 
 seed = 0
@@ -33,7 +36,7 @@ np.random.seed(seed); torch.manual_seed(seed); torch.cuda.manual_seed(seed)
 
 def get_all_seqs():
     seqs = sorted([d.name for d in SEQUENCES_DIR.iterdir() if d.is_dir()])
-    # exclude directorul 'list.txt' daca exista ca fisier
+    # keep directories only (list.txt may exist as a plain file)
     return [s for s in seqs if (SEQUENCES_DIR / s).is_dir()]
 
 
@@ -97,18 +100,18 @@ def main():
     ap.add_argument("--backbone", choices=["B", "L"], default="B",
                     help="B = SAM2.1-B+ (default), L = SAM2.1-Large (sam21pp-L)")
     ap.add_argument("--seqs", default=None,
-                    help="lista de secvente separate prin virgula (default: toate)")
+                    help="comma-separated sequence list (default: all)")
     ap.add_argument("--vel-ratio", type=float, default=None, help="override VEL_RATIO_THR (v3g)")
-    ap.add_argument("--tau-admit", type=float, default=None, help="override TAU_ADMIT_DRM (v7d2 recalibrare L)")
-    ap.add_argument("--out", required=True, help="subdir rezultat: <out>/baseline/")
+    ap.add_argument("--tau-admit", type=float, default=None, help="override TAU_ADMIT_DRM (v7d2, Large-backbone recalibration)")
+    ap.add_argument("--out", required=True, help="results subdir: <out>/baseline/")
     ap.add_argument("--max-regression", type=float, default=None,
-                    help="Stop daca dR cumulativ vs baseline > prag")
-    # Catastrofe per-secventa: daca N secvente individuale au dR > prag, oprim.
-    # Mai util decat cumulativ: o singura secventa de +0.40 nu ne trezeste, 5 da.
+                    help="stop if cumulative dR vs baseline exceeds this threshold")
+    # Per-sequence catastrophes: stop once N individual sequences regress past the
+    # threshold. More useful than the cumulative check: one +0.40 sequence is noise, five are a pattern.
     ap.add_argument("--max-catastrophes", type=int, default=None,
-                    help="Stop daca N secvente au dR individual > --catastrophe-thr")
+                    help="stop once N sequences each have dR > --catastrophe-thr")
     ap.add_argument("--catastrophe-thr", type=float, default=0.25,
-                    help="Prag dR per secventa pentru a fi considerata catastrofa (default 0.25)")
+                    help="per-sequence dR threshold counted as a catastrophe (default 0.25)")
     ap.add_argument("--mem-short", type=int, default=None)
     ap.add_argument("--mem-long",  type=int, default=None)
     args = ap.parse_args()
@@ -153,20 +156,20 @@ def main():
         wanted = [s.strip() for s in args.seqs.split(",") if s.strip()]
         missing = [s for s in wanted if s not in seqs]
         if missing:
-            print(f"[run_eval_170] ATENTIE: secvente inexistente: {missing}")
+            print(f"[run_eval_170] WARNING: unknown sequences: {missing}")
         seqs = [s for s in seqs if s in wanted]
     out_dir = RESULTS_ROOT / args.out / "baseline"
 
     print(f"[run_eval_170] tracker={args.tracker} backbone={args.backbone} out={args.out}")
-    print(f"[run_eval_170] {len(seqs)} secvente totale")
+    print(f"[run_eval_170] {len(seqs)} sequences total")
     if args.max_regression is not None:
-        print(f"[run_eval_170] GREEDY: stop daca dR_cumul > {args.max_regression:+.3f} dupa min 10 seq")
+        print(f"[run_eval_170] GREEDY: stop if cumulative dR > {args.max_regression:+.3f} after min 10 seqs")
     if args.max_catastrophes is not None:
-        print(f"[run_eval_170] GREEDY: stop daca {args.max_catastrophes} seq individuale au dR > {args.catastrophe_thr:+.2f}")
+        print(f"[run_eval_170] GREEDY: stop once {args.max_catastrophes} individual seqs have dR > {args.catastrophe_thr:+.2f}")
 
     ckpt, cfg = determine_tracker(TRACKER_NAME)
     shared = build_sam2_video_predictor(cfg, ckpt, device="cuda:0")
-    print(f"[run_eval_170] model incarcat, VRAM {torch.cuda.memory_allocated()/1e9:.2f} GB\n")
+    print(f"[run_eval_170] model loaded, VRAM {torch.cuda.memory_allocated()/1e9:.2f} GB\n")
 
     cumul_dr    = 0.0
     n_compared  = 0
@@ -179,7 +182,7 @@ def main():
         objects = get_objects(seq_dir)
         frames  = get_frames(seq_dir)
         if not objects or not frames:
-            print(f"[SKIP] {seq_name}: fara obiecte/cadre"); continue
+            print(f"[SKIP] {seq_name}: no objects/frames"); continue
         n_objects = len(objects)
 
         def rpath(oid):
@@ -189,7 +192,7 @@ def main():
         if all(rpath(oid).exists() for oid, _ in objects):
             print(f"[SKIP] {seq_name}: deja gata"); continue
 
-        print(f"[SEQ] {seq_name} — {len(frames)} cadre, {n_objects} obiect(e)")
+        print(f"[SEQ] {seq_name} — {len(frames)} frames, {n_objects} object(s)")
         img0 = Image.open(frames[0]); img_w, img_h = img0.width, img0.height
 
         for obj_id, gt_path in objects:
@@ -220,7 +223,7 @@ def main():
 
             op.parent.mkdir(parents=True, exist_ok=True)
             write_trajectory(str(op), pred_masks)
-            print(f"  obj{obj_id}: {len(pred_masks)} cadre -> {op.name}")
+            print(f"  obj{obj_id}: {len(pred_masks)} frames -> {op.name}")
 
         torch.cuda.empty_cache()
         print(f"  VRAM: {torch.cuda.memory_allocated()/1e9:.2f} GB")
@@ -242,12 +245,12 @@ def main():
             if (args.max_regression is not None and n_compared >= 10
                     and cumul_dr > args.max_regression):
                 print(f"\n[STOP-GREEDY] dR_cumul={cumul_dr:+.3f} > limita {args.max_regression:.3f} "
-                      f"dupa {n_compared} seq. Oprim.")
+                      f"after {n_compared} seqs. Stopping.")
                 stop = True
             if (args.max_catastrophes is not None
                     and n_catastrophes >= args.max_catastrophes):
-                print(f"\n[STOP-CATASTROFE] {n_catastrophes} secvente cu dR > {args.catastrophe_thr:.2f}. "
-                      f"Modelul cauzeaza pierderi masive sistematic. Oprim.")
+                print(f"\n[STOP-CATASTROPHES] {n_catastrophes} sequences with dR > {args.catastrophe_thr:.2f}. "
+                      f"The variant causes systematic large regressions. Stopping.")
                 stop = True
             if stop:
                 break

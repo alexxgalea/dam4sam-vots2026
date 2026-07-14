@@ -37,14 +37,8 @@ v7_probe_out/
 calib_result.txt
 .claude/
 
-# ── Internal planning / personal notes (NOT for a public repo) ──
-PLAN_WIN_VOTS2026.md
-PLAN_TONIGHT_OPUS.md
-PLAN_2GPU_RUN.md
-BRIEFING_FABLE.md
-BRIEFING_FABLE_R2.md
-RAPORT_INDRUMATOARE.md
-MIGRATION_PLAN.md
+# ── Internal planning notes, development journal, one-off ops scripts (local only) ──
+archive/
 
 # ── Python / OS cruft ──
 __pycache__/

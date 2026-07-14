@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Pre-pack integrity check (PLAN_WIN_VOTS2026 §6.3).
+"""Pre-submission integrity check for VOT-format tracker results.
 
 For every sequence in the workspace, verify the tracker results:
   - all expected per-object .bin files exist (catches the v3 silent 0/7-masks bug)
   - trajectory length == frame count
   - not all masks empty after init (degenerate output)
 
-Usage: python check_results_integrity.py --workspace workspace2026 --tracker dam4sam_v3g
+Usage: python scripts/check_results_integrity.py --workspace workspace2026 --tracker dam4sam_v3g
 Exit code 0 = clean (PENDING sequences allowed with --allow-pending), 1 = FAIL.
 """
 import argparse
