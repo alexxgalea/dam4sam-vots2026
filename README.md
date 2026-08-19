@@ -176,5 +176,5 @@ This is derivative research code built for challenge participation. The original
 (the tracker variants, the ablation harness, the evaluation and cloud tooling, and the
 documentation) are by Alexandru-Marian Galea and are released under the Apache License 2.0. The
 vendored DAM4SAM and SAM2 components are not covered by it and remain under their upstream terms —
-[LICENSE](LICENSE) states exactly which files fall on which side. Model weights are not
+[NOTICE](NOTICE) states exactly which files fall on which side. Model weights are not
 distributed here.
