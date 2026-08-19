@@ -1,26 +1,29 @@
 """
-DAM4SAMTrackerV7 — canal de identitate independent (PLAN_WIN_VOTS2026 §4).
+DAM4SAMTrackerV7 -- an appearance/identity channel independent of memory.
 
-Faza curenta: §4.1 — DOAR instrumentare (PROBE). Zero schimbare de comportament:
-cu PROBE=False clasa e bit-identica cu V3g (nu instaleaza nimic). Cu PROBE=True
-logheaza per frame semnalele de identitate per-candidat, fara sa atinga selectia.
+Two modes. With PROBE=False and USE_D2=False the class is bit-identical to V3g
+(nothing is installed). PROBE=True logs per-candidate identity signals for every
+frame without touching selection; USE_D2=True turns those signals into an
+admission rule for DAM4SAM's distractor-resolving memory (see below).
 
-Semnale extrase (per candidat, M=3):
-  1. obj_ptr per-candidat: forward-hook read-only pe sam_mask_decoder captureaza
-     sam_output_tokens [b,3,c] (use_multimask_token_for_obj_ptr=true in config),
-     apoi aplicam noi predictor.obj_ptr_proj. NB: decoder-ul primeste pix_feat
-     conditionat pe memorie — tokenii mostenesc partial conditionarea.
-  2. mask-pooling pe backbone_fpn stride-16 RAW (cached_features) — canal complet
-     independent de memorie (nu trece prin memory attention).
+Signals extracted per candidate mask (M=3):
+  1. Per-candidate obj_ptr: a read-only forward hook on sam_mask_decoder captures
+     sam_output_tokens [b,3,c] (use_multimask_token_for_obj_ptr=true in the
+     config), to which predictor.obj_ptr_proj is then applied here. Note that the
+     decoder receives a memory-conditioned pix_feat, so these tokens inherit part
+     of that conditioning.
+  2. Mask pooling over the RAW backbone_fpn stride-16 features (cached_features),
+     a channel fully independent of memory -- it never passes through memory
+     attention.
 
-Referinte (prototipuri de proba):
-  - P0  = frame-ul de init (imuabil). Atentie: obj_ptr-ul de la init vine din
-    tokenul single-mask (slice [0:1]), alt subspatiu decat tokenii multimask —
-    de aceea logam si referinta "last":
-  - LAST = ultimul cadru ales cu incredere (m_iou > 0.8) — proxy pentru o banca
-    de prototipuri adaptiva.
+Reference prototypes:
+  - P0  = the initialization frame (immutable). Caveat: the init obj_ptr comes
+    from the single-mask token (slice [0:1]), a different subspace than the
+    multimask tokens, which is why a second reference is kept:
+  - LAST = the most recent confidently selected frame (m_iou > 0.8), a proxy for
+    an adaptive prototype bank.
 
-Subclaseaza V3g. NU modifica dam4sam_tracker.py / sam2.
+Subclasses V3g. dam4sam_tracker.py and sam2/ are not modified.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -34,24 +37,26 @@ from dam4sam_tracker_v3g import DAM4SAMTrackerV3g
 
 
 class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
-    PROBE = False          # True: logheaza semnale identitate (fara schimbare de comportament)
-    CONF_IOU = 0.8         # prag "cadru ales cu incredere" pt referinta LAST
+    PROBE = False          # True: log identity signals (no behavioural change)
+    CONF_IOU = 0.8         # "confidently selected frame" threshold for the LAST reference
 
-    # ── D2: igiena memoriei (admission discipline) ──────────────────────
-    # Calibrat pe LaSOT v7probe (12-iun): id-ul mastii alese pe cadre curate
-    # p25=0.967/p50=0.99 vs drift p50=0.586. Prag 0.7 = pastreaza 98% din
-    # invatarea curata, blocheaza 79% din invatarea otravita de drift.
+    # -- D2: memory hygiene (admission discipline) -------------------------
+    # Calibrated on a LaSOT drift subset: the identity score of the selected mask
+    # is p25=0.967 / p50=0.99 on clean frames vs p50=0.586 during drift. A 0.7
+    # threshold keeps 98% of the clean learning and blocks 79% of the learning
+    # poisoned by drift.
     USE_D2 = False
-    TAU_ADMIT_DRM = 0.7    # add_to_drm doar daca id_score(masca aleasa) >= prag si non-suspect
-    # Mem-drop DEZACTIVAT implicit: pe drone-13 a infometat memoria si a stricat
-    # (frac 0.055 vs 0.025 fara). DRM-gating singur a batut v3g (4 ev vs 5).
-    TAU_DROP_MEM = -1.0    # >0 ar sterge frame-uri suspecte cu id mic din non-cond memory
-    TAU_BANK = 0.85        # admitere prototip in banca (strict > TAU_ADMIT_DRM)
-    LEASH_TAU = 0.45       # leash la P0: prototip nou trebuie sa semene macar atat cu init
-    BANK_CAP = 5           # P0 + max 4 prototipuri FIFO
-    BANK_GAP = 30          # cadre minim intre admiteri
-    # switch-detector online (config cu recall mare; costul unui suspect fals
-    # e doar "nu invatam cadrul asta" — aproape gratuit)
+    TAU_ADMIT_DRM = 0.7    # add_to_drm only if id_score(selected mask) >= this and not suspect
+    # Memory dropping is DISABLED by default: on drone-13 it starved memory and
+    # made things worse (drift fraction 0.055 vs 0.025 without it). DRM gating on
+    # its own beat v3g (4 drift events vs 5).
+    TAU_DROP_MEM = -1.0    # >0 would drop suspect low-identity frames from non-cond memory
+    TAU_BANK = 0.85        # prototype admission into the bank (strictly > TAU_ADMIT_DRM)
+    LEASH_TAU = 0.45       # leash to P0: a new prototype must resemble init at least this much
+    BANK_CAP = 5           # P0 + at most 4 FIFO prototypes
+    BANK_GAP = 30          # minimum number of frames between admissions
+    # online switch detector (high-recall configuration; the cost of a false
+    # suspect is only "do not learn from this frame", which is nearly free)
     SD_JUMP, SD_AREA, SD_HOLD, SD_AMIN = 0.8, 2.0, 8, 25.0
 
     # ------------------------------------------------------------------ init
@@ -64,17 +69,17 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
         self._install_decoder_hook()
         self._cap = None
         self._probe_records = []
-        self._probe_ref_mask = None    # pseudo-GT setat de runner inainte de track()
+        self._probe_ref_mask = None    # pseudo-GT set by the runner before track()
 
-        # P0 obj_ptr: pointerul frame-ului de init din output dict (post-proj)
+        # P0 obj_ptr: the init frame's pointer from the output dict (post-projection)
         try:
             p0 = self.inference_state["output_dict"]["cond_frame_outputs"][0]["obj_ptr"]
             self._p0_ptr = F.normalize(p0.flatten().float(), dim=0)
         except Exception:
             self._p0_ptr = None
 
-        # P0 hiera: mask-pool pe backbone_fpn stride-16 al frame-ului 0
-        # (la box-init init_mask e None -> folosim masca estimata intoarsa)
+        # P0 hiera: mask pooling over frame 0's backbone_fpn stride-16 features
+        # (with box init, init_mask is None -> use the estimated mask returned)
         m0 = init_mask if init_mask is not None else out.get("pred_mask")
         feat0 = self._raw_feat(0)
         self._p0_hiera = (self._pool(feat0, m0)
@@ -83,18 +88,19 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
         self._last_ptr = None
         self._last_hiera = None
 
-        # ── stare D2 ────────────────────────────────────────────────────
-        # Banca = P0 imuabil + slot rulant "last-confident" + prototipuri admise.
-        # Slotul rulant e CRITIC: calibrarea pragurilor (0.7/0.85) e pe distributia
-        # cos-vs-last-confident; fara el totul se masoara vs P0 si se sugruma
-        # invatarea (drone-13: bank_admits=0, drm_blocked 73%, 277 mem drops, 9 ev).
+        # -- D2 state ------------------------------------------------------
+        # Bank = immutable P0 + a rolling "last-confident" slot + admitted prototypes.
+        # The rolling slot is CRITICAL: the thresholds (0.7/0.85) were calibrated on
+        # the cosine-vs-last-confident distribution. Without it everything is measured
+        # against P0 and learning is choked (drone-13: bank_admits=0, 73% of DRM
+        # additions blocked, 277 memory drops, 9 drift events).
         self._bank = [self._p0_hiera] if self._p0_hiera is not None else []
         self._last_slot = None
         self._bank_last_admit = -self.BANK_GAP
         self._mem_drop_streak = 0
         self._sd_hold = 0
-        self._sd_prev_c = None     # centroid output anterior
-        self._sd_prev_a = None     # arie output anterioara
+        self._sd_prev_c = None     # previous output centroid
+        self._sd_prev_a = None     # previous output area
         self._suspect = False
         self._d2_stats = {"drm_blocked": 0, "drm_allowed": 0, "mem_dropped": 0,
                           "bank_admits": 0}
@@ -128,13 +134,13 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
         return max(float(torch.dot(emb, p)) for p in refs)
 
     def _d2_admit_ok(self):
-        """Apelat in mijlocul lui super().track() de guard-ul DRM, pe frame-ul curent.
-        Foloseste captura decoderului (deja setata de propagate) + detectorul de
-        switch de pana la frame-ul anterior (hold-ul acopera continuitatea)."""
+        """Called mid-way through super().track() by the DRM guard, on the current frame.
+        Uses the decoder capture (already set by propagate) plus the switch
+        detector state up to the previous frame (its hold covers continuity)."""
         if self._suspect:
             return False
         if self._cap is None or not self._bank:
-            return True   # fara semnal -> comportament baseline
+            return True   # no signal -> baseline behaviour
         masks_lr, ious_t, _, _ = self._cap
         ious = ious_t[0].float().cpu().numpy()
         ci = int(np.argmax(ious))
@@ -142,11 +148,11 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
         feat = self._raw_feat(self.frame_index)
         emb = self._pool(feat, cb) if feat is not None else None
         s = self._id_score(emb)
-        return not (s == s and s < self.TAU_ADMIT_DRM)   # nan -> permite
+        return not (s == s and s < self.TAU_ADMIT_DRM)   # nan -> allow
 
     def _d2_post_frame(self, out_mask):
-        """Dupa super().track(): actualizeaza switch-detectorul, banca si
-        igiena memoriei non-cond pe frame-ul tocmai procesat."""
+        """After super().track(): update the switch detector, the prototype bank
+        and non-conditioning memory hygiene for the frame just processed."""
         t = self.frame_index
         n_pix = int((out_mask == 1).sum())
         if n_pix > 0:
@@ -169,13 +175,13 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
         if c is not None:
             self._sd_prev_c, self._sd_prev_a = c, a
 
-        # embedding-ul outputului (pt banca + igiena memoriei)
+        # embedding of the output mask (for the bank + memory hygiene)
         feat = self._raw_feat(t)
         emb = self._pool(feat, out_mask) if feat is not None and n_pix > 0 else None
         s = self._id_score(emb)
 
-        # igiena: suspect + identitate joasa -> nu pastram cadrul in memoria non-cond.
-        # Cap pe drop-uri consecutive: nu infometam memoria (lectia rabbit/v6).
+        # hygiene: suspect + low identity -> do not keep the frame in non-cond memory.
+        # Consecutive drops are capped so memory is never starved (the rabbit/v6 lesson).
         if (self._suspect and s == s and s < self.TAU_DROP_MEM
                 and self._mem_drop_streak < 3):
             od = self.inference_state["output_dict"]
@@ -190,7 +196,7 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
         else:
             self._mem_drop_streak = 0
 
-        # slot rulant "last-confident" + admitere stricta in banca
+        # rolling "last-confident" slot + strict admission into the bank
         if emb is not None and self._cap is not None:
             ious = self._cap[1][0].float().cpu().numpy()
             srt = np.sort(ious)[::-1]
@@ -198,12 +204,12 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
             obj_ok = float(self._cap[3].flatten()[0]) > 0
             confident = float(srt[0]) > self.CONF_IOU and tie_closed and obj_ok
 
-            # slotul rulant urmeaza reteta probei (iou>0.8) + non-suspect;
-            # el tine distributia id_score aliniata cu calibrarea offline
+            # the rolling slot follows the probe recipe (iou > 0.8) + not suspect;
+            # it keeps the id_score distribution aligned with the offline calibration
             if confident and not self._suspect:
                 self._last_slot = emb
 
-            # prototip PERSISTENT: in plus leash la P0 + gap + prag strict
+            # PERSISTENT prototype: additionally leashed to P0 + gap + strict threshold
             if (confident and not self._suspect
                     and t - self._bank_last_admit >= self.BANK_GAP
                     and self._p0_hiera is not None
@@ -211,7 +217,7 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
                     and float(torch.dot(emb, self._p0_hiera)) >= self.LEASH_TAU):
                 self._bank.append(emb)
                 if len(self._bank) > self.BANK_CAP:
-                    self._bank.pop(1)   # FIFO peste sloturile non-P0; P0 imuabil
+                    self._bank.pop(1)   # FIFO over the non-P0 slots; P0 is immutable
                 self._bank_last_admit = t
                 self._d2_stats["bank_admits"] += 1
 
@@ -224,7 +230,7 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
 
         def _hook(module, args, kwargs, output):
             masks, ious, tokens, obj_logits = output
-            if tokens.shape[1] > 1:   # doar apelurile multimask (tracking)
+            if tokens.shape[1] > 1:   # multimask calls only (tracking)
                 self._cap = (masks.detach(), ious.detach(),
                              tokens.detach(), obj_logits.detach())
 
@@ -232,7 +238,7 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
             _hook, with_kwargs=True)
 
     def _raw_feat(self, frame_idx):
-        """backbone_fpn stride-16 RAW (ne-conditionat de memorie) din cache."""
+        """RAW backbone_fpn stride-16 features (not memory-conditioned) from cache."""
         cached = self.inference_state.get("cached_features", {})
         entry = cached.get(frame_idx)
         if entry is None:
@@ -321,7 +327,7 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
         else:
             rec["iou_ref"] = [float("nan")] * M
 
-        # indexul ales efectiv (dupa poarta v3g): candidatul cel mai apropiat de output
+        # the index actually selected (after the v3g gate): candidate closest to the output
         out_m = out["pred_mask"]
         S = masks_lr.shape[-1]
         out_lr = cv2.resize(out_m.astype(np.float32), (S, S),
@@ -332,7 +338,7 @@ class DAM4SAMTrackerV7(DAM4SAMTrackerV3g):
         rec["sam_argmax"] = int(np.argmax(ious))
         self._probe_records.append(rec)
 
-        # actualizeaza referinta LAST doar pe cadre alese cu incredere
+        # update the LAST reference only on confidently selected frames
         ci = rec["chosen"]
         if ious[ci] > self.CONF_IOU and cand_bins[ci].sum() > 0:
             self._last_ptr = ptrs[ci].clone()

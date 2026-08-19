@@ -96,7 +96,9 @@ def make_shared(TrackerCls, shared_predictor):
 @torch.inference_mode()
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--tracker", choices=["baseline", "v2", "v3", "v3b", "v3g", "v4", "v5", "v6", "v7", "v7d2"], default="v3")
+    ap.add_argument("--tracker", choices=["baseline", "v2", "v3", "v3b", "v3g", "v4", "v5", "v6", "v7", "v7d2",
+                                          "ko_tie", "ko_speed", "ko_lifecycle", "ko_postproc", "ko_blend",
+                                          "ko_motion", "ko_chassis"], default="v3")
     ap.add_argument("--backbone", choices=["B", "L"], default="B",
                     help="B = SAM2.1-B+ (default), L = SAM2.1-Large (sam21pp-L)")
     ap.add_argument("--seqs", default=None,
@@ -122,6 +124,10 @@ def main():
 
     if args.tracker == "baseline":
         from dam4sam_tracker import DAM4SAMTracker as TC
+    elif args.tracker.startswith("ko_"):
+        # Per-component knock-outs: constants-only subclasses of V3g (docs/ABLATION.md)
+        from dam4sam_tracker_knockouts import KNOCKOUTS
+        TC = KNOCKOUTS[args.tracker]
     elif args.tracker in ("v7", "v7d2"):
         from dam4sam_tracker_v7 import DAM4SAMTrackerV7 as TC
         if args.tracker == "v7d2":

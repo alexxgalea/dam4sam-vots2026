@@ -50,3 +50,6 @@ __pycache__/
 
 # upstream example images (not needed)
 dam4sam/imgs/
+
+# ── Run logs ──
+logs/

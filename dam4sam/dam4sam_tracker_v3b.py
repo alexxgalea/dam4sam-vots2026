@@ -1,13 +1,15 @@
 """
-DAM4SAMTrackerV3b — v3 cu TIE_MARGIN redus (0.15 -> 0.05).
+DAM4SAMTrackerV3b -- v3 with a tightened TIE_MARGIN (0.15 -> 0.05).
 
-Problema v3: TIE_MARGIN=0.15 face ca Kalman sa intervina prea des pe secventele
-"usoare" unde SAM2 e deja sigur (gap top-2 intre 0.05-0.15). O singura alegere
-gresita (babychimp frame 622) -> derivare -> +0.409 regresie catastrofala.
+Problem with v3: at TIE_MARGIN=0.15 the filter intervenes too often on "easy"
+sequences where SAM2 is already confident (top-2 gap between 0.05 and 0.15). One
+wrong pick (babychimp, frame 622) is enough to start a drift -- a +0.409
+catastrophic regression on the proxy metric.
 
-Fix: TIE_MARGIN=0.05 -> KF intervine NUMAI la tie-uri extrem de stranse.
-Pe secvente grele (fish2, racing-16): SAM2 e confuz, gap < 0.05 des -> KF tot ajuta.
-Pe secvente usoare: SAM2 e sigur, gap > 0.05 -> KF nu intervine -> fara derivare.
+Fix: TIE_MARGIN=0.05, so the filter is consulted ONLY on extremely tight ties.
+On hard sequences (fish2, racing-16) SAM2 is confused and the gap is frequently
+below 0.05, so the filter still helps. On easy sequences the gap stays above
+0.05, the filter never intervenes, and there is nothing to drift.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))

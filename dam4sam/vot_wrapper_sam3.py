@@ -12,7 +12,15 @@ return sequences from corrupting the TRAX protocol stream.
 import sys
 import os
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
-sys.path.insert(0, "/home/alexx/Projects/VOTSTracker/sam3_upstream")
+
+# See dam4sam_tracker_sam3.py: SAM3_ROOT / SAM3_CHECKPOINT are overridable via env.
+SAM3_ROOT = os.environ.get(
+    "SAM3_ROOT",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sam3_upstream"),
+)
+SAM3_CHECKPOINT = os.environ.get("SAM3_CHECKPOINT",
+                                 os.path.join(SAM3_ROOT, "checkpoints", "sam3.pt"))
+sys.path.insert(0, SAM3_ROOT)
 
 import random
 import numpy as np
@@ -69,7 +77,7 @@ def main():
     # ── Build SAM3 predictor once and share it across all objects ─────────────
     from sam3.model_builder import build_tracker
     from dam4sam_tracker_sam3 import _load_sam3_tracker_checkpoint
-    ckpt_path = "/home/alexx/Projects/VOTSTracker/sam3_upstream/checkpoints/sam3.pt"
+    ckpt_path = SAM3_CHECKPOINT
     log("[vot_wrapper_sam3] Loading SAM3 model...")
     shared_predictor = build_tracker(
         apply_temporal_disambiguation=True, with_backbone=True

@@ -1,0 +1,62 @@
+VOTS2026 SEQUESTERED knock-out ablation -- raw benchmark scores
+================================================================
+Source: the VOTS2026 benchmark server (https://eu.aihub.ml/competitions/201),
+        submitted 2026-08-05..08-14, i.e. the same scoring pipeline and the same
+        sequestered ground truth as the official challenge results.
+Control: ko_lifecycle returned exactly the published dam4sam_v3g figures, which
+        confirms that the post-challenge benchmark scores the same data as the
+        headline result.
+
+variant                 Q         Acc       Rob       NRE       DRE       ADQ
+dam4sam_b (published) 0.598     0.716     0.796     0.055     0.149     0.571
+v3g       (published) 0.614     0.769     0.817     0.035     0.148     0.542
+ko_lifecycle          0.6141804 0.7693352 0.8168324 0.0352771 0.1478905 0.5419980
+ko_tie                0.6141804 0.7693352 0.8168324 0.0352771 0.1478905 0.5419980
+ko_postproc           0.6150172 0.7689516 0.8185347 0.0352771 0.1461883 0.5419980
+ko_speed              0.6038583 0.7654383 0.8065481 0.0383356 0.1551163 0.5244010
+ko_blend              0.6083863 0.7614920 0.8156850 0.0365081 0.1478068 0.5594896
+ko_motion             0.6141804 0.7693352 0.8168324 0.0352771 0.1478905 0.5419980
+ko_chassis            0.6150172 0.7689516 0.8185347 0.0352771 0.1461883 0.5419980
+
+DELTAS vs the full model (v3g: Q 0.61418 / NRE 0.03528):
+  ko_lifecycle   Q  0.0000   NRE  0.0000    <- inert
+  ko_tie         Q  0.0000   NRE  0.0000    <- inert
+  ko_motion      Q  0.0000   NRE  0.0000    <- inert (entire motion pathway)
+  ko_postproc    Q +0.0008   NRE  0.0000    <- removing it helps slightly
+  ko_chassis     Q +0.0008   NRE  0.0000    <- memory bound alone
+  ko_speed       Q -0.0103   NRE +0.0031    <- the only load-bearing gate
+  ko_blend       Q -0.0058   NRE +0.0012
+
+BYTE-LEVEL VERIFICATION of the stored trajectories (375 .bin files per variant).
+Reproduce with:
+  python scripts/compare_trajectories.py --reference dam4sam_v3g --variants 'dam4sam_ko_*'
+
+  ko_lifecycle   375 identical /   0 differ   <- a genuine null, not a plumbing bug
+  ko_tie         375 identical /   0 differ   <- genuine null
+  ko_motion      375 identical /   0 differ   <- ENTIRE motion path removed, still identical
+  ko_postproc     14 identical / 361 differ   <- knock-out took effect
+  ko_speed         1 identical / 374 differ   <- took effect
+  ko_blend         0 identical / 375 differ   <- took effect
+  ko_chassis     375 identical to ko_postproc <- predicted before the run; confirmed exactly
+
+READING
+1. The speed gate is the only load-bearing gate (-0.0103 Q when forced open),
+   and it is load-bearing by staying shut -- it protects the tracker from its own
+   motion prior.
+2. The ambiguity gate and the filter lifecycle are provably inert: byte-identical
+   masks, not merely equal metrics. Once the speed gate is closed the AND-cascade
+   short-circuits everything behind it.
+3. Conditional post-processing is marginally harmful (+0.0008 Q when removed).
+4. Every variant sits at NRE 0.035-0.038 against a baseline of 0.055, so the
+   missed-detection gain lives in what all variants SHARE: the V3 chassis. Its one
+   substantive difference from the baseline is MEM_WINDOW=300 sliding-window
+   pruning of non_cond_frame_outputs (plus CPU offload); dam4sam_tracker.py has no
+   such pruning -- verified in source.
+5. Settled by the last two runs: ko_motion (no Kalman filter instantiated at all)
+   is byte-identical to the full model on 375/375, and ko_chassis (memory bound
+   only) is byte-identical to ko_postproc on 375/375, exactly as predicted before
+   it was run. The memory window carries the whole gain; the motion module never
+   executed. Root cause: a predict()/gate deadlock -- see docs/ABLATION.md.
+6. ko_speed (-0.0103) is worse than ko_blend (-0.0058) despite removing fewer
+   components: ko_blend's motion weight is 0.2 vs 0.5. Aggressive motion on
+   ambiguous frames hurts more than mild motion everywhere.

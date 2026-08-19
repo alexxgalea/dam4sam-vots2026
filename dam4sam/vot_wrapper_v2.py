@@ -1,8 +1,8 @@
 """
-VOTS2026 wrapper pentru DAM4SAMTrackerV2 (SAM2.1-B+ motion-aware + post-proc).
+VOTS2026 wrapper for DAM4SAMTrackerV2 (SAM2.1-B+ motion-aware + post-processing).
 
-Multi-object: un DAM4SAMTrackerV2 per obiect, cu un singur predictor incarcat
-(modelul SAM2.1-B+ ocupa GPU o singura data).
+Multi-object: one DAM4SAMTrackerV2 per object, sharing a single loaded predictor
+(the SAM2.1-B+ weights occupy the GPU once).
 """
 import sys
 import os
@@ -33,7 +33,7 @@ torch.cuda.manual_seed(seed)
 
 
 class _ObjectTracker(DAM4SAMTrackerV2):
-    """Single-object DAM4SAMTrackerV2 ce reutilizeaza un predictor deja incarcat."""
+    """Single-object DAM4SAMTrackerV2 reusing an already loaded predictor."""
     def __init__(self, shared_predictor, tracker_name=TRACKER_NAME):
         self.checkpoint, self.model_cfg = determine_tracker(tracker_name)
         self.input_image_size = 1024
@@ -41,15 +41,15 @@ class _ObjectTracker(DAM4SAMTrackerV2):
         self.img_std  = torch.tensor([0.229, 0.224, 0.225], dtype=torch.float32)[:, None, None]
         self.predictor = shared_predictor
         self.tracking_times = []
-        self.kf = None  # initializat in initialize()
+        self.kf = None  # initialised in initialize()
 
     def init_state_tw(self):
-        # Mosteneste fix-ul CPU storage din DAM4SAMTrackerV2
+        # Inherits the CPU-storage fix from DAM4SAMTrackerV2
         return DAM4SAMTrackerV2.init_state_tw(self)
 
 
 def make_full_size(x, output_sz):
-    """Zero-pad masca x (dreapta si jos) la output_sz (width, height)."""
+    """Zero-pad mask x (right and bottom) to output_sz (width, height)."""
     if x.shape[0] == output_sz[1] and x.shape[1] == output_sz[0]:
         return x
     pad_x = output_sz[0] - x.shape[1]
@@ -74,7 +74,7 @@ def main():
     image = Image.open(imagefile)
     init_masks = [make_full_size(m, (image.width, image.height)) for m in objects]
 
-    # Incarca predictor o singura data, partajat intre obiecte
+    # Load the predictor once and share it across objects
     checkpoint, model_cfg = determine_tracker(TRACKER_NAME)
     shared_predictor = build_sam2_video_predictor(model_cfg, checkpoint, device="cuda:0")
 
@@ -95,7 +95,7 @@ def main():
         for t in trackers:
             outputs = t.track(image)
             status.append(outputs["pred_mask"])
-            torch.cuda.empty_cache()  # elibereaza VRAM fragmentat intre obiecte
+            torch.cuda.empty_cache()  # release fragmented VRAM between objects
 
         handle.report(status)
 

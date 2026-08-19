@@ -1,7 +1,7 @@
 """
-VOTS wrapper for DAM4SAMTrackerV3g (motion-gated, poarta de viteza scale-invariant).
-Multi-object, shared predictor. Identic cu vot_wrapper_v3.py
-dar foloseste DAM4SAMTrackerV3g in loc de DAM4SAMTrackerV3.
+VOT wrapper for DAM4SAMTrackerV3g (motion gated by a scale-invariant speed test).
+Multi-object, shared predictor. Identical to vot_wrapper_v3.py except that it
+uses DAM4SAMTrackerV3g instead of DAM4SAMTrackerV3.
 """
 import sys, random, os
 import numpy as np

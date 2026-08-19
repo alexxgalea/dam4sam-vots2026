@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "If you use this code or its results, please cite the VOTS2026 challenge results paper."
+title: "DAM4SAM-VOTS2026: training-free SAM2.1 tracker variants and a sequestered-set component ablation"
+authors:
+  - family-names: Galea
+    given-names: Alexandru-Marian
+    affiliation: "The National University of Science and Technology Politehnica Bucharest, Romania"
+    email: alexandru.galea2000@gmail.com
+repository-code: "https://github.com/alexxgalea/dam4sam-vots2026"
+abstract: >-
+  Six training-free tracker variants built on DAM4SAM / SAM2.1, evaluated in the main
+  VOTS2026 sub-challenge (ECCV 2026 Workshops). All six exceeded the co-authorship
+  baseline; the best (dam4sam_l_cloud) reached Q=0.639, rank 9/25, outperforming the
+  committee DAM4SAM entry, and dam4sam_v3g posted NRE=0.035, the third lowest
+  not-reported error of all 25 entries. The repository additionally contains a
+  seven-variant knock-out ablation scored on the sequestered evaluation set, with
+  byte-level verification of stored trajectories, which attributes the measured gain
+  to bounded non-conditioning memory and documents a state-estimation deadlock that
+  rendered the intended motion module unreachable.
+keywords:
+  - visual object tracking
+  - video object segmentation
+  - SAM2
+  - VOTS2026
+  - ablation study
+  - negative results
+license: "Apache-2.0"   # original contributions only; see LICENSE for scope
+preferred-citation:
+  type: conference-paper
+  title: "The Fourth Visual Object Tracking Segmentation VOTS2026 Challenge Results"
+  authors:
+    - family-names: Kristan
+      given-names: Matej
+    - family-names: Matas
+      given-names: "Jiří"
+    - family-names: Tokmakov
+      given-names: Pavel
+    - family-names: Harley
+      given-names: Adam
+    - family-names: Felsberg
+      given-names: Michael
+    - name: "and others (incl. A.-M. Galea)"
+  collection-title: "Computer Vision -- ECCV 2026 Workshops"
+  year: 2026
+  url: "https://openreview.net/forum?id=zGOan36xpF"

@@ -1,31 +1,31 @@
 """
-DAM4SAMTrackerV4 — v3 + manipulare explicita DISPARITIE/REAPARITIE (long-term).
+DAM4SAMTrackerV4 -- v3 + explicit DISAPPEARANCE / REAPPEARANCE handling (long-term).
 
-VOTS2026 pune accent pe obiecte care ies din cadru si revin. Cazul nostru de
-esec dominant: SAM2 halucineaza o masca pe un distractor in timpul absentei
-(capul de ocluzie object_score_logits>0 e prea increzator) si polueaza memoria,
-incat nu mai re-detecteaza corect.
+VOTS2026 emphasises objects that leave the frame and come back. Our dominant
+failure mode: during an absence SAM2 hallucinates a mask on a distractor (the
+occlusion head, object_score_logits > 0, is over-confident) and pollutes memory,
+after which the true target is no longer re-detected correctly.
 
-V4 adauga, peste reparatiile chirurgicale din v3, un AUTOMAT DE STARE
-prezenta/absenta cu histerezis, training-free, folosind 3 semnale gratuite:
+On top of v3's surgical fixes, V4 adds a training-free presence/absence STATE
+MACHINE with hysteresis, driven by three signals that are free at inference time:
 
-  - object_score_logits  : capul nativ de ocluzie SAM2 (citit din predictor.curr_out)
-  - m_iou                : IoU prezis al mastii alese
-  - appearance_sim       : potrivirea histogramei HSV a regiunii mascate cu
-                           template-ul de init (respinge distractorii)
+  - object_score_logits  : SAM2's native occlusion head (read from predictor.curr_out)
+  - m_iou                : predicted IoU of the selected mask
+  - appearance_sim       : HSV histogram match between the masked region and the
+                           initialization template (rejects distractors)
 
-Comportament:
-  PRESENT --(K cadre "rele" la rand)--> ABSENT  (emite masca GOALA)
-  ABSENT  --(J cadre "bune" la rand)--> PRESENT (reinit KF, reia)
+Behaviour:
+  PRESENT --(K consecutive "bad" frames)--> ABSENT  (emit an EMPTY mask)
+  ABSENT  --(J consecutive "good" frames)--> PRESENT (re-init the filter, resume)
 
-In ABSENT: masca de output = goala; NU actualizam KF; NU adaugam in DRM
-(igiena de memorie -> re-detectia foloseste template-uri curate).
+While ABSENT: the output mask is empty, the filter is not updated, and nothing is
+added to the DRM (memory hygiene -> re-detection works from clean templates).
 
-Acelasi semnal appearance_sim e folosit ca metrica de validare GT-free
-(vezi validate_appearance.py): cat de bine se potriveste aspectul pe cadrele
-non-goale = increderea ca urmarim obiectul real, nu un distractor.
+The same appearance_sim signal doubles as a ground-truth-free validation metric:
+how well appearance matches on non-empty frames is a proxy for the confidence
+that the tracked region is the real object rather than a distractor.
 
-Subclaseaza DAM4SAMTrackerV3 (deci NU modifica fisierele de baza).
+Subclasses DAM4SAMTrackerV3, so the base files are not modified.
 """
 import sys
 import os
@@ -43,29 +43,29 @@ from motion import KalmanBoxTracker, mask_to_bbox, bbox_iou
 
 
 class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
-    # ── Toggle automat absenta ──────────────────────────────────────────
+    # -- Absence state machine toggles -------------------------------------
     USE_ABSENCE     = True
     USE_APPEARANCE  = True
 
-    # ── Praguri decizie "detectie buna" ─────────────────────────────────
-    OBJ_LOGIT_THR = 0.0    # capul nativ de ocluzie SAM2 (logit>0 = prezent)
-    ABS_IOU_THR   = 0.50   # IoU prezis sub asta = suspect
-    APP_SIM_THR   = 0.45   # similaritate aspect sub asta = posibil distractor
+    # -- Thresholds for a "good detection" ---------------------------------
+    OBJ_LOGIT_THR = 0.0    # SAM2's native occlusion head (logit > 0 = present)
+    ABS_IOU_THR   = 0.50   # predicted IoU below this = suspicious
+    APP_SIM_THR   = 0.45   # appearance similarity below this = possible distractor
     MIN_PIX       = 10
 
-    # ── Histerezis ──────────────────────────────────────────────────────
-    ABSENT_K  = 3          # cadre rele consecutive -> ABSENT
-    PRESENT_J = 2          # cadre bune consecutive -> PRESENT
-    APP_EMA   = 0.05       # rata de update a template-ului de aspect (lent)
+    # -- Hysteresis ---------------------------------------------------------
+    ABSENT_K  = 3          # consecutive bad frames -> ABSENT
+    PRESENT_J = 2          # consecutive good frames -> PRESENT
+    APP_EMA   = 0.05       # update rate of the appearance template (slow)
 
-    # ── Aspect ──────────────────────────────────────────────────────────
-    HS_BINS = (16, 16)     # binuri histograma Hue-Saturation
+    # -- Appearance ---------------------------------------------------------
+    HS_BINS = (16, 16)     # Hue-Saturation histogram bins
 
-    # ── Fereastra de memorie non-cond pastrata (fix re-detectie) ─────────
-    # Bisectat pe rabbit: fereastra trebuie sa cuprinda ancorele "obiect prezent"
-    # dinainte de absenta ca SAM2 sa re-detecteze. 60 prea mic (empty 0.85), 100+
-    # restaureaza la nivel base (empty 0.51). 300 acopera absente lungi, marginit
-    # (OOM-safe; keep-all a dat OOM pe uav1 la frame 1499).
+    # -- Bounded non-conditioning memory window (re-detection fix) ---------
+    # Bisected on rabbit: the window must still contain the "object present"
+    # anchors from before the absence for SAM2 to re-detect. 60 is too small
+    # (emptiness 0.85), 100+ restores baseline level (0.51). 300 covers long
+    # absences and stays bounded (keeping all frames OOM'd on uav1 at frame 1499).
     MEM_WINDOW = 300
 
     # =====================================================================
@@ -85,7 +85,7 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
                 self.ref_hist = self.init_hist
         return out
 
-    # ── Histograma Hue-Saturation normalizata peste regiunea mascata ────
+    # -- Normalised Hue-Saturation histogram over the masked region --------
     def _hs_hist(self, rgb, mask):
         ys, xs = np.where(mask > 0)
         if len(xs) < self.MIN_PIX:
@@ -97,7 +97,7 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
         return hist.flatten().astype(np.float32)
 
     def _is_good_declaration(self, n_pix, obj_logit, m_iou, app_sim):
-        """Criterii pt a NU incrementa absent_streak (PRESENT branch). Override in v6."""
+        """Criteria for NOT incrementing absent_streak (PRESENT branch). Overridden in v6."""
         return (
             n_pix >= self.MIN_PIX
             and obj_logit > self.OBJ_LOGIT_THR
@@ -123,7 +123,7 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
             t = self.predictor.curr_out["object_score_logits"]
             return float(np.asarray(t.flatten()[0].cpu()))
         except Exception:
-            return 10.0  # daca lipseste, presupune prezent (ca SAM2)
+            return 10.0  # if unavailable, assume present (as SAM2 does)
 
     # =====================================================================
     @torch.inference_mode()
@@ -149,7 +149,7 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
                 out_frame_idx, _, out_mask_logits, alternative_masks_ious = out
                 all_masks, out_all_ious = alternative_masks_ious
 
-                # ── Selectie mask (identic v3: SAM argmax + tiebreaker KF) ─
+                # -- Mask selection (as in v3: SAM argmax + filter tiebreak) -
                 ious = np.asarray(out_all_ious, dtype=np.float64)
                 m_idx = int(np.argmax(ious))
                 kf_healthy = (
@@ -184,7 +184,7 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
                     cur_hist = self._hs_hist(rgb, m)
                     app_sim = self._app_sim(cur_hist)
 
-                # ── Automat de stare prezenta/absenta ────────────────────
+                # -- Presence/absence state machine -------------------------
                 if self.USE_ABSENCE:
                     if self.state == "PRESENT":
                         if self._is_good_declaration(n_pix, obj_logit, m_iou, app_sim):
@@ -196,7 +196,7 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
                             if self.absent_streak >= self.ABSENT_K:
                                 self.state = "ABSENT"
                                 self.present_streak = 0
-                                self._need_reinit = True  # KF nesigur dupa pierdere
+                                self._need_reinit = True  # filter unsafe after a loss
                     else:  # ABSENT
                         if self._is_good_redetection(n_pix, obj_logit, m_iou, app_sim):
                             self.present_streak += 1
@@ -207,9 +207,9 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
                             self.present_streak = 0
 
                 in_absent = self.USE_ABSENCE and self.state == "ABSENT"
-                do_drm = not in_absent  # igiena memorie: fara adaugari in absenta
+                do_drm = not in_absent  # memory hygiene: no additions while absent
 
-                # ── Ciclu de viata KF (ca v3, dar suspendat in absenta) ──
+                # -- Filter lifecycle (as in v3, suspended while absent) ----
                 if self.USE_MOTION and not in_absent:
                     bb = mask_to_bbox(m) if n_pix >= self.KF_GATE_PIXELS else None
                     size_ok = True
@@ -283,7 +283,7 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
                                     obj_id=0,
                                 )
 
-                # ── In ABSENT: emite masca goala ─────────────────────────
+                # -- While ABSENT: emit an empty mask -----------------------
                 if in_absent:
                     m = np.zeros_like(m)
 
@@ -297,10 +297,10 @@ class DAM4SAMTrackerV4(DAM4SAMTrackerV3):
 
             return {"pred_mask": m}
 
-    # ── Pruning memorie non-cond (extras pt override in v5 adaptiv) ──────
-    # Pastram ultimele MEM_WINDOW cadre (SAM2 are nevoie de ~35-100 pentru
-    # re-detectie); stergem doar ce e mai vechi -> fix OOM FARA a ucide
-    # memoria temporala de care depinde reacapararea dupa absenta.
+    # -- Non-conditioning memory pruning (factored out for v5's adaptive override)
+    # Keep the last MEM_WINDOW frames (SAM2 needs ~35-100 for re-detection) and
+    # drop only what is older: an OOM fix that does not destroy the temporal
+    # memory re-acquisition after an absence depends on.
     def _prune_memory(self):
         cutoff = self.frame_index - self.MEM_WINDOW
         self._prune_below(cutoff)

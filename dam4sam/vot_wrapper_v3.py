@@ -1,7 +1,7 @@
 """
 VOTS wrapper for DAM4SAMTrackerV3 (motion-aware, Kalman TIE_MARGIN=0.15).
-Multi-object, shared predictor. Identic cu vot_wrapper_multiobject.py
-dar foloseste DAM4SAMTrackerV3 in loc de DAM4SAMTracker.
+Multi-object, shared predictor. Identical to vot_wrapper_multiobject.py except
+that it uses DAM4SAMTrackerV3 instead of DAM4SAMTracker.
 """
 import sys, random, os
 import numpy as np

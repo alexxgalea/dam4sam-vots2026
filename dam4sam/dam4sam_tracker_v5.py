@@ -1,24 +1,24 @@
 """
-DAM4SAMTrackerV5 — v4 + MEMORIE ADAPTIVA (rezolva compromisul ferestrei).
+DAM4SAMTrackerV5 -- v4 + ADAPTIVE MEMORY (resolves the window trade-off).
 
-Descoperire (22 secvente grele, metrica gradata):
-  - memorie SCURTA (keep-1): fish2 -0.70, seagull -0.41 (uita aspectul stale) DAR
-    rabbit +0.86 (fara ancora pre-absenta -> nu re-detecteaza)
-  - memorie LUNGA (keep-300): rabbit reparat DAR fish2 pierde avantajul
-  Sunt opuse pentru o fereastra FIXA.
+Finding (22 hard sequences, graded proxy metric):
+  - SHORT memory (keep-1): fish2 -0.70, seagull -0.41 (stale appearance is
+    forgotten) BUT rabbit +0.86 (no pre-absence anchor -> no re-detection)
+  - LONG memory (keep-300): rabbit is fixed BUT fish2 loses its advantage
+  For a FIXED window the two requirements are opposites.
 
-V5 leaga fereastra de starea automatului de absenta din v4:
-  - PRESENT : fereastra SCURTA (MEM_WINDOW_SHORT) -> uita aspectul stale,
-              pastreaza beneficiul fish2/seagull.
-  - ABSENT  : fereastra LUNGA (MEM_WINDOW_LONG) -> NU prune-uieste ancorele
-              pre-absenta (ultimele cadre cu obiect prezent), ca SAM2 sa poata
-              re-detecta cand obiectul revine (beneficiul rabbit).
+V5 ties the window to v4's absence state machine:
+  - PRESENT : SHORT window (MEM_WINDOW_SHORT) -> forget stale appearance, keep
+              the fish2/seagull benefit.
+  - ABSENT  : LONG window (MEM_WINDOW_LONG) -> do NOT prune the pre-absence
+              anchors (the last frames with the object visible), so SAM2 can
+              re-detect when the object returns (the rabbit benefit).
 
-La debutul absentei, cadrele recente (cu obiect, dinainte de disparitie) sunt
-inca in fereastra scurta; trecerea la fereastra lunga le ingheata -> ancore
-disponibile pe toata durata absentei.
+At the onset of an absence the recent frames (object still visible) are still
+inside the short window; switching to the long window freezes them, so the
+anchors stay available for the whole absence.
 
-Subclaseaza DAM4SAMTrackerV4; suprascrie DOAR _prune_memory().
+Subclasses DAM4SAMTrackerV4; overrides ONLY _prune_memory().
 """
 import sys
 import os
@@ -28,9 +28,9 @@ from dam4sam_tracker_v4 import DAM4SAMTrackerV4
 
 
 class DAM4SAMTrackerV5(DAM4SAMTrackerV4):
-    # fereastra cand obiectul e prezent (uitare rapida -> fish2/seagull)
+    # window while the object is present (fast forgetting -> fish2/seagull)
     MEM_WINDOW_SHORT = 30
-    # fereastra cand obiectul e absent (pastreaza ancorele -> re-detectie rabbit)
+    # window while the object is absent (keeps the anchors -> rabbit re-detection)
     MEM_WINDOW_LONG = 400
 
     def _prune_memory(self):

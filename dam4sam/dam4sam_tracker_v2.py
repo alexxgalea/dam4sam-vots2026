@@ -1,15 +1,18 @@
 """
-DAM4SAMTrackerV2 — DAM4SAM + SAM2.1-B+ cu doua imbunatatiri training-free:
+DAM4SAMTrackerV2 -- DAM4SAM + SAM2.1-B+ with two training-free additions:
 
-1. Selectie motion-aware (SAMURAI-style): filtru Kalman re-ordoneaza mastile
-   candidate SAM2 dupa consistenta de miscare, in loc de pur IoU SAM.
-   Tinteste miscarea rapida si distractorii.
+1. Motion-aware selection (SAMURAI-style): a Kalman filter re-ranks SAM2's
+   candidate masks by motion consistency instead of SAM IoU alone. Aimed at fast
+   motion and distractors.
 
-2. Post-procesare masca de output: keep_largest_component elimina blob-urile
-   spurioase de distractori din masca finala.
+2. Output mask post-processing: keep_largest_component removes spurious
+   distractor blobs from the final mask.
 
-Subclaseaza DAM4SAMTracker — NU modifica dam4sam_tracker.py.
-Logica DRM ramane identica cu originalul (praguri din paper, neschimbate).
+Subclasses DAM4SAMTracker -- dam4sam_tracker.py is NOT modified.
+DRM logic stays identical to the original (paper thresholds, unchanged).
+
+Historical note: V2 was a net wash on the development subset -- see
+docs/ABLATION.md. V3 is the surgical correction of it.
 """
 import sys
 import os
@@ -29,24 +32,24 @@ class DAM4SAMTrackerV2(DAM4SAMTracker):
     """
     DAM4SAM + motion-aware mask selection + output post-processing.
 
-    Toggles (atribute de clasa — schimba-le pentru ablatie):
-      USE_MOTION   = True   re-ordoneaza mastile candidate dupa KF motion score
-      MOTION_WEIGHT = 0.20  scor = (1-w)*sam_iou + w*motion_iou
-      USE_POSTPROC = True   keep_largest_component pe masca de output
-      KF_GATE_PIXELS = 1    actualizeaza KF doar daca obiectul e prezent
+    Toggles (class attributes -- flip them for ablation):
+      USE_MOTION   = True   re-rank candidate masks by the KF motion score
+      MOTION_WEIGHT = 0.20  score = (1-w)*sam_iou + w*motion_iou
+      USE_POSTPROC = True   keep_largest_component on the output mask
+      KF_GATE_PIXELS = 1    update the filter only when the object is present
     """
     USE_MOTION    = True
     MOTION_WEIGHT = 0.20
     USE_POSTPROC  = True
     KF_GATE_PIXELS = 1
 
-    # -- VRAM fix: offload frame outputs pe CPU (ca in vot_wrapper_large.py) --
+    # -- VRAM fix: offload frame outputs to CPU (as in vot_wrapper_large.py) --
     def init_state_tw(self):
         state = super().init_state_tw()
         state["storage_device"] = torch.device("cpu")
         return state
 
-    # -- initialize: super() + init KF din masca de init --
+    # -- initialize: super() + filter init from the initialization mask --
     @torch.inference_mode()
     def initialize(self, image, init_mask, bbox=None):
         out = super().initialize(image, init_mask, bbox=bbox)
@@ -59,10 +62,10 @@ class DAM4SAMTrackerV2(DAM4SAMTracker):
                     self.kf = KalmanBoxTracker(bb)
         return out
 
-    # -- track: motion-aware selection + post-proc --
+    # -- track: motion-aware selection + post-processing --
     @torch.inference_mode()
     def track(self, image, init=False):
-        # Pregatire imagine (identic cu super)
+        # Image preparation (identical to super)
         prepared_img = self._prepare_image(image).unsqueeze(0)
         if not init:
             self.frame_index += 1
@@ -76,7 +79,7 @@ class DAM4SAMTrackerV2(DAM4SAMTracker):
             return_all_masks=True,
         ):
             if len(out) == 3:
-                # Frame de initializare — nu avem alternative masks
+                # Initialization frame -- no alternative masks available
                 out_frame_idx, _, out_mask_logits = out
                 m = (out_mask_logits[0][0] > 0.0).float().cpu().numpy().astype(np.uint8)
 
@@ -84,7 +87,7 @@ class DAM4SAMTrackerV2(DAM4SAMTracker):
                 out_frame_idx, _, out_mask_logits, alternative_masks_ious = out
                 all_masks, out_all_ious = alternative_masks_ious
 
-                # ── Selectie mask: motion-aware sau original ──────────────────
+                # -- Mask selection: motion-aware or original --------------------
                 if self.USE_MOTION and self.kf is not None and len(all_masks) > 0:
                     pred_bbox = self.kf.predict()
 
@@ -104,7 +107,7 @@ class DAM4SAMTrackerV2(DAM4SAMTracker):
                 chosen_logits = all_masks[m_idx]
                 m = (chosen_logits[0][0] > 0.0).float().cpu().numpy().astype(np.uint8)
 
-                # ── Aggiorna KF cu bbox-ul ales ───────────────────────────────
+                # -- Update the filter with the selected box ---------------------
                 if self.USE_MOTION and self.kf is not None:
                     n_pix = int((m == 1).sum())
                     if n_pix >= self.KF_GATE_PIXELS:
@@ -112,7 +115,7 @@ class DAM4SAMTrackerV2(DAM4SAMTracker):
                         if bb is not None:
                             self.kf.update(bb)
 
-                # ── Logica DRM (identica cu originalul) ──────────────────────
+                # -- DRM logic (identical to the original) -----------------------
                 alternative_masks_list = [
                     mask for i, mask in enumerate(all_masks) if i != m_idx
                 ]
@@ -166,16 +169,16 @@ class DAM4SAMTrackerV2(DAM4SAMTracker):
                                     obj_id=0,
                                 )
 
-            # ── Post-procesare masca de output ────────────────────────────────
+            # -- Output mask post-processing ---------------------------------
             if self.USE_POSTPROC and int((m == 1).sum()) > 0:
                 m = keep_largest_component(m)
 
             self.inference_state["images"].pop(self.frame_index)
 
-            # ── Pruning non-cond frame outputs (fix OOM pe secvente lungi) ────
-            # Fara pruning, output-urile non-cond se acumuleaza frame cu frame
-            # pana la OOM (chiar si pe CPU, SAM2 le muta pe GPU la fiecare inferenta).
-            # Acelasi fix ca in dam4sam_tracker_sam3.py.
+            # -- Pruning non-conditioning frame outputs (OOM fix, long sequences)
+            # Without pruning these accumulate frame by frame until the run OOMs
+            # (even when stored on CPU, SAM2 moves them to GPU on every inference).
+            # Same fix as in dam4sam_tracker_sam3.py.
             output_dict = self.inference_state["output_dict"]
             for f in list(output_dict["non_cond_frame_outputs"].keys()):
                 if f < self.frame_index:

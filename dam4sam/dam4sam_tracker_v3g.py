@@ -1,30 +1,38 @@
 """
-DAM4SAMTrackerV3g — V3 cu POARTA DE VITEZA (motion gated).
+DAM4SAMTrackerV3g -- V3 with a SPEED GATE on the motion tiebreaker.
 
-Motivatie (din calibrarea pe Q real, 09-Jun-2026):
-  Pe VOST-val (Q real cu GT public) V3 e USOR MAI SLAB ca baseline (0.381 vs 0.392).
-  Cauza: re-ranking-ul de motion intervine si pe obiecte LENTE/DEFORMABILE (manipulare
-  in bucatarie), unde modelul Kalman constant-velocity prezice gresit (obiectul sta/se
-  deformeaza). Tiebreaker-ul V3 se declanseaza cand SAM e ambiguu, dar NU verifica daca
-  miscarea e informativa.
+Motivation (from the calibration against real Q, June 2026):
+  On VOST-val (real Q, public ground truth) V3 is slightly WORSE than the baseline
+  (0.381 vs 0.392). Cause: motion re-ranking also fires on SLOW / DEFORMABLE objects
+  (kitchen manipulation), where a constant-velocity Kalman model mispredicts (the
+  object is stationary or deforming). V3's tiebreaker triggers when SAM is ambiguous
+  but never checks whether the motion is informative at all.
 
-  Diagnosticul serverului VOTS2026 (baseline Q=0.69): pierderea principala e DRE (drift,
-  0.09) >> NRE (ratari, 0.05). Deci tinta corecta e reducerea drift-ului pe miscare rapida,
-  FARA sa atingem secventele lente unde baseline e deja bun.
+  Server diagnosis on VOTS2026 (baseline Q=0.69): the dominant loss is DRE (drift,
+  0.09) >> NRE (missed detections, 0.05). The right target is therefore drift under
+  fast motion, WITHOUT touching the slow sequences where the baseline is already good.
 
-Idee: pe langa conditia V3 (SAM ambiguu + KF sanatos), cerem si ca obiectul sa se miste
-SUFICIENT DE REPEDE ca motion-ul sa fie informativ. Altfel poarta se inchide -> argmax(sam)
-pur = comportament Base+.
+Idea: on top of V3's condition (SAM ambiguous + filter healthy), also require the
+object to move FAST ENOUGH for motion to be informative. Otherwise the gate closes
+and selection falls back to plain argmax(sam) = Base+ behaviour.
 
-Prag SCALE-INVARIANT: viteza centroidului raportata la dimensiunea obiectului.
+SCALE-INVARIANT threshold: centroid speed relative to object size.
   speed_ratio = |(vx, vy)| / sqrt(w*h)
-  poarta deschisa daca speed_ratio >= VEL_RATIO_THR.
-=> independent de rezolutie si de marimea obiectului. Pe obiecte lente (kitchen) ratio~0,
-   poarta inchisa -> NU putem fi mai rai ca baseline acolo. Pe miscare rapida (uav, racing,
-   seagull) ratio mare -> motion intervine si reduce drift-ul, ca in V3.
+  the gate opens if speed_ratio >= VEL_RATIO_THR.
+=> independent of resolution and object size. On slow objects (kitchen) the ratio is
+   ~0 and the gate stays shut, so we cannot be worse than the baseline there. On fast
+   motion (uav, racing, seagull) the ratio is large, motion intervenes and reduces
+   drift, as in V3.
 
-Prin constructie: V3g <= regresii(V3) si pastreaza castigurile V3 pe miscare rapida.
-Subclaseaza V3 — schimba DOAR poarta. NU modifica dam4sam_tracker.py.
+By construction: V3g <= regressions(V3), while keeping V3's gains on fast motion.
+Subclasses V3 -- ONLY the gate changes. dam4sam_tracker.py is not modified.
+
+POST-CHALLENGE FINDING (docs/ABLATION.md): this gate never opens. The velocity it
+tests can only become non-zero through the filter's predict() step, and predict() is
+called only inside the branch the gate guards -- a deadlock. Removing the entire
+motion pathway leaves the output masks byte-identical on all 375 target-sequences,
+so the improvement measured for this tracker belongs to V3's bounded memory window,
+not to the gate. Forcing the gate open (ko_speed) costs -0.010 Q.
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -32,8 +40,8 @@ from dam4sam_tracker_v3 import DAM4SAMTrackerV3
 
 
 class DAM4SAMTrackerV3g(DAM4SAMTrackerV3):
-    # Prag viteza/dimensiune: obiectul trebuie sa se mute >= atat din propria
-    # dimensiune pe cadru ca sa consideram motion-ul informativ. Tunabil.
+    # Speed/size threshold: the object must move at least this fraction of its
+    # own size per frame before motion is considered informative.
     VEL_RATIO_THR = 0.03
 
     def _motion_gate_open(self):

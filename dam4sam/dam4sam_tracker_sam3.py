@@ -11,7 +11,17 @@ Differences from dam4sam_tracker.py:
 
 import sys
 import os
-sys.path.insert(0, "/home/alexx/Projects/VOTSTracker/sam3_upstream")
+
+# SAM3 is not vendored here (gated weights). Point SAM3_ROOT at a clone of
+# https://github.com/facebookresearch/sam3 , or place it next to this repository
+# as ../sam3_upstream. The checkpoint is expected in <SAM3_ROOT>/checkpoints/.
+SAM3_ROOT = os.environ.get(
+    "SAM3_ROOT",
+    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sam3_upstream"),
+)
+SAM3_CHECKPOINT = os.environ.get("SAM3_CHECKPOINT",
+                                 os.path.join(SAM3_ROOT, "checkpoints", "sam3.pt"))
+sys.path.insert(0, SAM3_ROOT)
 
 import numpy as np
 import yaml
@@ -87,7 +97,7 @@ class DAM4SAMTrackerSAM3:
             self.predictor = shared_predictor
         else:
             from sam3.model_builder import build_tracker
-            ckpt_path = "/home/alexx/Projects/VOTSTracker/sam3_upstream/checkpoints/sam3.pt"
+            ckpt_path = SAM3_CHECKPOINT
             # with_backbone=True: tracker runs standalone (computes its own image features)
             self.predictor = build_tracker(
                 apply_temporal_disambiguation=True, with_backbone=True
