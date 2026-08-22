@@ -142,11 +142,22 @@ VARIANTS="ko_motion ko_chassis" scripts/run_knockouts.sh   # or a subset
 
 # the byte-level comparison the conclusions rest on (no GPU, no ground truth needed)
 python scripts/compare_trajectories.py --reference dam4sam_v3g --variants 'dam4sam_ko_*'
+
+# why the motion gate can never open, on the Kalman filter alone (no GPU, no dataset)
+python scripts/test_gate_deadlock.py
 ```
 
 The comparison is what separates *"this component contributes nothing"* from *"this component
 never executed"*: three variants reproduce the full model's masks byte for byte on all 375
 target-sequences, while the variants that do bypass the speed gate differ on 361-375 of them.
+The scope-condition control runs the same way — on VOST-val, where targets never leave the frame,
+the memory bound is byte-identical to the baseline on all 107 target-sequences:
+
+```bash
+python scripts/compare_trajectories.py --workspace workspace_vost_val \
+       --reference dam4sam_b --variants dam4sam_ko_postproc
+```
+
 Benchmark scores for every variant are in
 [docs/knockout_scores.txt](docs/knockout_scores.txt); the analysis is in
 [docs/ABLATION.md](docs/ABLATION.md).

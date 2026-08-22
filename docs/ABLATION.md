@@ -29,7 +29,7 @@ SAM2 keeps two stores: *conditioning* memory (a small set of promoted anchor fra
 recent-appearance and distractor-resolving banks, capped and admission-gated) and
 *non-conditioning* memory, which holds the model's own outputs for previously processed frames
 and is consulted by memory attention for temporal consistency. The baseline retains
-non-conditioning outputs for **every** frame; on VOTS2026 sequences (mean ≈2000 frames, max
+non-conditioning outputs for **every** frame; on VOTS2026 sequences (mean ≈2,000 frames, max
 10,699) that history is unbounded.
 
 Our variants evict non-conditioning entries older than `W = 300` frames. Conditioning memory is
@@ -157,6 +157,40 @@ Readings:
    the whole published improvement. The DRM admission rules, promotion thresholds and bank cap
    (`DRM_MAX_FRAMES=30`) are identical between baseline and variants — verified in source.
 
+## A control where the memory bound provably does nothing (VOST-val)
+
+The mechanism above makes a sharp prediction. If the window acts by truncating SAM2's *unbounded
+backward search* for a frame in which the target was last visible, then where the target never
+disappears the search never has to travel far, the window never truncates a lookup that would
+otherwise have succeeded, and the bound must be a **bit-exact no-op** — however long the sequence.
+
+[VOST-val](https://www.vostdataset.org/) supplies that regime: 70 sequences of slow, kitchen-scale
+manipulation with public ground truth, in which targets are transformed and divided rather than
+leaving the frame. Comparing `ko_postproc` (the memory bound with the conditional filter removed
+and the motion pathway inert — i.e. baseline + `MEM_WINDOW` only) against the baseline:
+
+```bash
+python scripts/compare_trajectories.py --workspace workspace_vost_val \
+       --reference dam4sam_b --variants dam4sam_ko_postproc
+#   dam4sam_ko_postproc   107 identical / 0 differ   <- byte-identical on all files
+```
+
+**107 / 107 target-sequences byte-identical**, across the 69 sequences both trackers complete —
+including all **13** sequences longer than `W`, on which the window evicts up to **155** frames of
+history (`4030_cut_broccoli`, 455 frames). Not one output bit changes. The bound is inert there not
+because nothing was pruned, but because nothing that was pruned would ever have been read.
+
+Two things follow. The first is the scope condition: the window buys nothing on video without
+absences, which is consistent with the gain being confined to NRE with DRE unchanged. The second
+is a stronger form of the elimination argument above — if any *other* live behavioural difference
+existed between the V3 chassis and the baseline, this run could not have come out bit-exact. The
+"verified in source" claim of reading 5 is therefore also a measured one.
+
+*(The one excluded sequence, `1203_cut_mango`, has seven concurrent targets, on which the
+concurrent multi-object wrapper used for these VOST-val runs emits no output. The failure predates
+the ablation, is independent of the memory bound, and does not affect the VOTS2026 runs, which
+score objects sequentially via [`scripts/run_eval_170.py`](../scripts/run_eval_170.py).)*
+
 ## Diagnosis: a gate that cannot open
 
 Provable inertness demands an explanation. Three individually reasonable facts compose into a
@@ -173,7 +207,15 @@ deadlock:
    ([`dam4sam_tracker_v3.py:144`](../dam4sam/dam4sam_tracker_v3.py#L144)).
 
 Gate needs velocity → velocity needs `predict()` → `predict()` needs the gate. The branch is
-unreachable by construction, and no input distribution can revive it.
+unreachable by construction, and no input distribution can revive it. Facts 1 and 2 are
+reproducible on the filter alone, with no GPU and no dataset:
+
+```bash
+python scripts/test_gate_deadlock.py
+#   update() only     : vx=0.0000000000  rho=0.0000  gate=False
+#   predict()+update(): vx=7.9999532934  rho=0.0800  gate=True
+#   max |K[4:, :]|    : 0.0e+00   (velocity rows of the Kalman gain)
+```
 
 This explains every row of the table: knock-outs of the lifecycle and ambiguity gate modify code
 that never runs; the two variants that differ are precisely the two that bypass the speed gate.

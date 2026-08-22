@@ -1,9 +1,9 @@
 # Running the full evaluation on rented cloud GPUs
 
 The SAM2.1-Large runs over the full VOTS2026 sequence set (~26 GB, ~300k frames) are impractical
-on a single 12 GB local GPU. This is the workflow used for the official submissions, on rented
-RTX 4090 instances (e.g. vast.ai), including the durability tooling that survived instance
-preemptions and a GPU fault.
+on the single 10 GB local GPU (RTX 3080) used for the B+ variants. This is the workflow used for
+the official Large submissions, on rented RTX 4090 instances (e.g. vast.ai), including the
+durability tooling that survived instance preemptions and a GPU fault.
 
 ## 1. Upload the code
 
