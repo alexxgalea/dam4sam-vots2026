@@ -121,6 +121,16 @@ class KOChassisOnly(DAM4SAMTrackerV3g):
     USE_POSTPROC = False
 
 
+class KOChassisNoWindow(KOChassisOnly):
+    """Chassis only, memory bound switched off: the single-constant control.
+
+    Differs from KOChassisOnly by MEM_WINDOW alone (same runner, same precision,
+    same CPU offload), so any difference in output between the two is the
+    window's doing. The cutoff is never positive, so nothing is ever evicted.
+    """
+    MEM_WINDOW = 10**9
+
+
 KNOCKOUTS = {
     "ko_tie":       KONoTieGate,
     "ko_speed":     KONoSpeedGate,
@@ -129,4 +139,5 @@ KNOCKOUTS = {
     "ko_blend":     KOBlendV2Style,
     "ko_motion":    KONoMotion,
     "ko_chassis":   KOChassisOnly,
+    "ko_nowindow":  KOChassisNoWindow,
 }

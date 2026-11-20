@@ -12,6 +12,13 @@ same sequestered set, then showed that the component we credited for that number
 and that the gain belongs to a bounded memory window introduced for unrelated engineering
 reasons. Both halves are reported below.
 
+> **Correction (Nov 2026).** Two conclusions below do not hold as written; they are marked in
+> place. (1) The memory window is credited with the entire gain over the baseline, but the
+> baseline was scored from a run made through a different pipeline than the window variants, so
+> that attribution is not established. (2) The backward search the window truncates is DAM4SAM's,
+> not SAM2's. The comparisons *among* the knock-outs, the inertness of the motion pathway and the
+> deadlock diagnosis are unaffected. See [WINDOW_CONTROL.md](WINDOW_CONTROL.md).
+
 ## Setting
 
 All variants are **training-free** extensions of
@@ -43,7 +50,9 @@ during a confusion episode are predictions of a distractor. Retained indefinitel
 biases the model when the true target reappears. Bounding the window gives contamination a finite
 lifetime.
 
-*Introduced as an OOM fix; turned out to be the only component that moves the metrics.*
+*Introduced as an OOM fix. Among the components of the full model it is the only one left that
+could move the metrics; whether it does, and in which direction, is the subject of
+[WINDOW_CONTROL.md](WINDOW_CONTROL.md).*
 
 ### Component 2 — Scale-invariant motion gate (V3 → V3g)
 
@@ -107,6 +116,9 @@ simultaneously improving Q, Acc and Rob over its baseline — which rules out pr
 unchanged (0.055 → 0.054). The memory window leaves DRE unchanged (0.149 → 0.148) but collapses
 NRE. The two levers act on disjoint error axes and compose.
 
+*Corrected: the NRE difference is between runs made through different pipelines, so it cannot be
+assigned to the memory window alone; see [WINDOW_CONTROL.md](WINDOW_CONTROL.md).*
+
 ## Per-component knock-outs (sequestered set)
 
 Each variant disables exactly one component; everything else is bit-identical. Rows marked ≡
@@ -157,9 +169,16 @@ Readings:
    the whole published improvement. The DRM admission rules, promotion thresholds and bank cap
    (`DRM_MAX_FRAMES=30`) are identical between baseline and variants — verified in source.
 
+   **Corrected:** the first half stands (the two variants are byte-identical). The second does
+   not follow. The `dam4sam_b` row was scored from a toolkit run under autocast, every other row
+   from `run_eval_170.py` in fp32; the stored trajectories of the two differ from the first frames
+   on all 375 target-sequences, long before the window can act. The gap between the first two
+   rows of the table therefore mixes the window with the pipeline. Note also that `dam4sam_b` is
+   DAM4SAM with the DRM capped at 30 frames, which upstream DAM4SAM does not have.
+
 ## A control where the memory bound provably does nothing (VOST-val)
 
-The mechanism above makes a sharp prediction. If the window acts by truncating SAM2's *unbounded
+The mechanism above makes a sharp prediction. If the window acts by truncating DAM4SAM's *unbounded
 backward search* for a frame in which the target was last visible, then where the target never
 disappears the search never has to travel far, the window never truncates a lookup that would
 otherwise have succeeded, and the bound must be a **bit-exact no-op** — however long the sequence.

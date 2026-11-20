@@ -601,6 +601,16 @@ class SAM2Base(torch.nn.Module):
                 outs_.append(out)
                 ram_frame_indices.append(prev_frame_idx)
 
+            # Optional instrumentation (no effect on computed values): record which
+            # non-conditioning frame fills each RAM slot, -1 for an empty slot.
+            # Enabled by setting `ram_selection_log = []` on the model.
+            if getattr(self, "ram_selection_log", None) is not None:
+                self.ram_selection_log.append((
+                    frame_idx,
+                    len(selected_cond_outputs),
+                    [idx if o is not None else -1 for idx, o in zip(ram_frame_indices, outs_)],
+                ))
+
             # For RAM frames, we sort them by frame index, to assign the correct temporal positional encoding later
             for out_f_idx, out in zip(ram_frame_indices, outs_):
                 t_pos_and_prevs.append((out_f_idx, out))

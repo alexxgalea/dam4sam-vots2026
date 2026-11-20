@@ -12,10 +12,17 @@ ECCV 2026 Workshops — [OpenReview](https://openreview.net/forum?id=zGOan36xpF)
 > **Post-challenge finding (Aug 2026).** A per-component ablation scored on the *sequestered*
 > evaluation set showed that the motion gate these trackers were built around **never executed**:
 > removing the entire motion pathway leaves the output masks byte-identical on all 375
-> target-sequences. The measured gain comes from a bounded sliding window over SAM2's
-> non-conditioning memory — a change originally made for GPU-memory reasons. The full diagnosis
-> is in [docs/ABLATION.md](docs/ABLATION.md); the knock-out variants are in
+> target-sequences. What remains between these trackers and the baseline is a bounded sliding
+> window over the non-conditioning memory — a change originally made for GPU-memory reasons. The
+> full diagnosis is in [docs/ABLATION.md](docs/ABLATION.md); the knock-out variants are in
 > [`dam4sam/dam4sam_tracker_knockouts.py`](dam4sam/dam4sam_tracker_knockouts.py).
+
+> **Correction (Nov 2026).** The ablation went on to credit that window with the whole gain. That
+> is not established: the scored baseline and the window variants were run through different
+> pipelines (toolkit wrapper under autocast vs. standalone runner in fp32), so their difference is
+> not the window's alone. A single-constant control shows that the window acts exactly where
+> predicted, but changes the output in both directions, with a net effect on "target absent"
+> predictions close to zero. See [docs/WINDOW_CONTROL.md](docs/WINDOW_CONTROL.md).
 
 ## Official results (VOTS2026 dataset, 120 sequences, sequestered ground truth)
 
@@ -42,22 +49,23 @@ Highlights:
   same-backbone baseline.
 - **The mechanism behind that number is not the one we designed for.** A 7-variant knock-out
   ablation, scored on the sequestered set and verified byte-for-byte against the stored
-  trajectories, attributes the gain to bounded non-conditioning memory and shows the gated motion
-  prior to be inert — and actively harmful when forced to run. See
-  [docs/ABLATION.md](docs/ABLATION.md).
+  trajectories, shows the gated motion prior to be inert — and actively harmful when forced to
+  run. See [docs/ABLATION.md](docs/ABLATION.md). The ablation's attribution of the gain to the
+  memory window did not survive a cleaner control
+  ([docs/WINDOW_CONTROL.md](docs/WINDOW_CONTROL.md)).
 
 ## Method (original contributions)
 
 All variants are pure subclasses of the DAM4SAM baseline; with flags disabled each is
 bit-identical to it (verified per change).
 
-- **Bounded non-conditioning memory** (`dam4sam/dam4sam_tracker_v3.py`, `MEM_WINDOW`) — SAM2 retains
-  its own past predictions for every processed frame; on sequences of thousands of frames this
-  history grows unbounded, so evidence produced while the tracker was confused about a distractor
-  stays available to memory attention indefinitely. A sliding window evicts non-conditioning
-  outputs older than `W = 300` frames while leaving conditioning memory (promoted anchors,
-  including frame 0) untouched. **This is what the measured improvement is attributable to** — see
-  the ablation.
+- **Bounded non-conditioning memory** (`dam4sam/dam4sam_tracker_v3.py`, `MEM_WINDOW`) — the tracker
+  retains its own past predictions for every processed frame, and DAM4SAM's recent-appearance
+  memory searches backwards through them, without bound, for a frame in which the target was
+  visible. A sliding window evicts non-conditioning outputs older than `W = 300` frames while
+  leaving conditioning memory (promoted anchors, including frame 0) untouched, which cuts that
+  search off. It changes the output only after about 270 consecutive empty predictions, and then in
+  either direction — see [docs/WINDOW_CONTROL.md](docs/WINDOW_CONTROL.md).
 - **Scale-invariant motion gate** (`dam4sam/dam4sam_tracker_v3g.py`) — a constant-velocity Kalman
   filter used only as a *gated tiebreaker*: when SAM2.1's mask selection is ambiguous, candidates
   are re-ranked by motion consistency, but only if the object's size-normalized velocity exceeds a

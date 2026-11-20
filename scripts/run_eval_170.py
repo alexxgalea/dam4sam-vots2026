@@ -98,7 +98,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--tracker", choices=["baseline", "v2", "v3", "v3b", "v3g", "v4", "v5", "v6", "v7", "v7d2",
                                           "ko_tie", "ko_speed", "ko_lifecycle", "ko_postproc", "ko_blend",
-                                          "ko_motion", "ko_chassis"], default="v3")
+                                          "ko_motion", "ko_chassis", "ko_nowindow"], default="v3")
     ap.add_argument("--backbone", choices=["B", "L"], default="B",
                     help="B = SAM2.1-B+ (default), L = SAM2.1-Large (sam21pp-L)")
     ap.add_argument("--seqs", default=None,
@@ -114,9 +114,35 @@ def main():
                     help="stop once N sequences each have dR > --catastrophe-thr")
     ap.add_argument("--catastrophe-thr", type=float, default=0.25,
                     help="per-sequence dR threshold counted as a catastrophe (default 0.25)")
+    ap.add_argument("--autocast", action="store_true",
+                    help="run under torch.autocast('cuda'), as the VOT toolkit wrappers do "
+                         "(default: fp32, as the official knock-out runs)")
+    ap.add_argument("--strict", action="store_true",
+                    help="abort on the first tracking error instead of recording an empty mask "
+                         "for that frame (an out-of-memory error otherwise turns into silent "
+                         "'target absent' predictions for the rest of the sequence)")
+    ap.add_argument("--blocking-copies", action="store_true",
+                    help="make every CPU<->GPU tensor copy blocking. Needed under WSL2 when frame "
+                         "outputs are stored on the CPU: non-blocking copies leak host-memory "
+                         "registrations in the GPU paravirtualisation layer until a copy fails with "
+                         "'CUDA error: out of memory' at under 1 GB of VRAM. Values are unchanged.")
+    ap.add_argument("--log-selection", action="store_true",
+                    help="save, next to each trajectory, which frame filled each RAM slot "
+                         "(<name>_ramsel.npy: frame, n_cond, slot0..slot5; -1 empty, -2 no slot)")
     ap.add_argument("--mem-short", type=int, default=None)
     ap.add_argument("--mem-long",  type=int, default=None)
     args = ap.parse_args()
+
+    if args.autocast:
+        torch.autocast("cuda").__enter__()   # held for the whole run
+    if args.blocking_copies:
+        _cuda, _to = torch.Tensor.cuda, torch.Tensor.to
+        def _blocking(fn):
+            def wrapped(self, *a, **k):
+                k.pop("non_blocking", None)
+                return fn(self, *a, **k)
+            return wrapped
+        torch.Tensor.cuda, torch.Tensor.to = _blocking(_cuda), _blocking(_to)
 
     global TRACKER_NAME
     if args.backbone == "L":
@@ -212,6 +238,8 @@ def main():
                 print(f"  obj{obj_id}: eroare GT: {e}"); continue
 
             tracker = make_shared(TC, shared)
+            if args.log_selection:
+                shared.ram_selection_log = []
             try:
                 tracker.initialize(img0, init_mask)
             except Exception as e:
@@ -224,11 +252,18 @@ def main():
                     pred_masks.append(Mask(out["pred_mask"]))
                 except Exception as e:
                     print(f"  obj{obj_id} frame {fi}: eroare track: {e}")
+                    if args.strict:
+                        print(f"[run_eval_170] --strict: aborting, {op.name} not written")
+                        sys.exit(3)
                     pred_masks.append(Mask(np.zeros((img_h, img_w), dtype=np.uint8)))
                 torch.cuda.empty_cache()
 
             op.parent.mkdir(parents=True, exist_ok=True)
             write_trajectory(str(op), pred_masks)
+            if args.log_selection:
+                sel = [[f, nc] + idx + [-2] * (6 - len(idx)) for f, nc, idx in shared.ram_selection_log]
+                np.save(str(op)[:-4] + "_ramsel.npy", np.array(sel, dtype=np.int32).reshape(-1, 8))
+                shared.ram_selection_log = None
             print(f"  obj{obj_id}: {len(pred_masks)} frames -> {op.name}")
 
         torch.cuda.empty_cache()
